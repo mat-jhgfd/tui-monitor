@@ -292,9 +292,9 @@ fn parse_telemetry_line(line: &str) -> (Option<u64>, Option<f64>, Option<f64>) {
 
 pub fn run() -> Result<(), Box<dyn Error>> {
     // Graph configuration
-    let cfg_msg = GraphConfig::new(10, 1_000, (0.0, 1000.0));
-    let cfg_rssi = GraphConfig::new(10, 1_000, (-120.0, 0.0));
-    let cfg_rssi_packet = GraphConfig::new(10, 1_000, (-120.0, 0.0));
+    let cfg_msg = GraphConfig::new(50, 1_000, (0.0, 1000.0));
+    let cfg_rssi = GraphConfig::new(50, 1_000, (-120.0, 0.0));
+    let cfg_rssi_packet = GraphConfig::new(50, 1_000, (-120.0, 0.0));
 
     // Shared graphs
     let g_msg: SharedGraph = Arc::new(RwLock::new(GraphShared::new(
@@ -308,15 +308,15 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         cfg_rssi,
         "RSSI ACK (dBm)",
         Color::Cyan,
-        false,
-        1.0,
+        true,
+        0.5,
     )));
     let g_rssi_packet: SharedGraph = Arc::new(RwLock::new(GraphShared::new(
         cfg_rssi_packet,
         "RSSI PACKET (dBm)",
         Color::Yellow,
-        false,
-        1.0,
+        true,
+        0.5,
     )));
 
     let graphs: Vec<SharedGraph> = vec![g_msg.clone(), g_rssi.clone(), g_rssi_packet.clone()];
