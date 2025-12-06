@@ -103,7 +103,22 @@ impl crate::ui::Panel for GraphPanel {
 
         // Stats row (min, max, last)
         let (mn, mx, last) = g.data.stats();
-        let stats_text = format!("Min: {:.3}  Max: {:.3}  Last: {:.3}", mn, mx, last);
+        // Compute global min/max from history
+        let mut global_min = f64::INFINITY;
+        let mut global_max = f64::NEG_INFINITY;
+        for &(_, y) in &g.data.history {
+            if y < global_min {
+                global_min = y;
+            }
+            if y > global_max {
+                global_max = y;
+            }
+        }
+        // Display global min/max in the stats row
+        let stats_text = format!(
+            "Min: {:.3}  Max: {:.3}  Last: {:.3}",
+            global_min, global_max, last
+        );
         let stats_par =
             Paragraph::new(stats_text).block(Block::default().title("Stats").borders(Borders::ALL));
         f.render_widget(stats_par, chunks[0]);
