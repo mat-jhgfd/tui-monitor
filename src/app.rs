@@ -171,19 +171,18 @@ use crate::ui::{Node, group, leaf};
 use ratatui::style::Color;
 
 /// Spawn a thread that reads telemetry from a serial port (e.g., /dev/ttyACM0),
-/// parses each line for message number, RSSI, and payload numeric fields,
+/// parses each line for message number, RSSI, and RSSI_PACKET,
 /// and pushes them into the corresponding shared graphs.
 fn start_serial_reader(
     port_name: &str,
     g_msg: SharedGraph,
     g_rssi: SharedGraph,
-    g_payload: SharedGraph,
+    g_rssi_packet: SharedGraph,
 ) {
     let port_name = port_name.to_string();
     thread::spawn(move || {
         let baud_rate = 115_200;
         println!("Opening serial port {} @ {} baud", port_name, baud_rate);
-
         let port = match serialport::new(&port_name, baud_rate)
             .timeout(Duration::from_secs(10))
             .open()
@@ -194,10 +193,8 @@ fn start_serial_reader(
                 return;
             }
         };
-
         let reader = BufReader::new(port);
         println!("Serial reader started on {}", port_name);
-
         for line_res in reader.lines() {
             match line_res {
                 Ok(line) => {
@@ -205,31 +202,31 @@ fn start_serial_reader(
                     if trimmed.is_empty() {
                         continue;
                     }
-
-                    let (maybe_msgnum, maybe_rssi, maybe_payload_numeric) =
+                    // Parse the line for message number, RSSI, and RSSI_PACKET
+                    let (maybe_msgnum, maybe_rssi, maybe_rssi_packet) =
                         parse_telemetry_line(trimmed);
 
+                    // Update message graph
                     if let Some(msgnum) = maybe_msgnum {
                         if let Ok(mut gm) = g_msg.write() {
                             let x = gm.data.history.back().map(|(x, _)| x + 1.0).unwrap_or(0.0);
                             gm.data.push_point(x, msgnum as f64);
                         }
                     }
-
+                    // Update RSSI graph
                     if let Some(rssi) = maybe_rssi {
                         if let Ok(mut gr) = g_rssi.write() {
                             let x = gr.data.history.back().map(|(x, _)| x + 1.0).unwrap_or(0.0);
                             gr.data.push_point(x, rssi);
                         }
                     }
-
-                    if let Some(payload_val) = maybe_payload_numeric {
-                        if let Ok(mut gp) = g_payload.write() {
-                            let x = gp.data.history.back().map(|(x, _)| x + 1.0).unwrap_or(0.0);
-                            gp.data.push_point(x, payload_val);
+                    // Update RSSI_PACKET graph
+                    if let Some(rssi_packet) = maybe_rssi_packet {
+                        if let Ok(mut gr) = g_rssi_packet.write() {
+                            let x = gr.data.history.back().map(|(x, _)| x + 1.0).unwrap_or(0.0);
+                            gr.data.push_point(x, rssi_packet);
                         }
                     }
-
                     thread::sleep(Duration::from_millis(1));
                 }
                 Err(e) => {
@@ -238,101 +235,91 @@ fn start_serial_reader(
                 }
             }
         }
-
         println!("Serial reader exiting");
     });
 }
 
-/// Parse a telemetry line and extract message number, RSSI, and payload numeric values.
+/// Parse a telemetry line and extract message number, RSSI, and RSSI_PACKET.
 ///
-/// Example accepted formats:
-/// - `M 14 lr -75.0`
-/// - `MSG 12 RSSI -73.5 VOLT:3.71`
+/// Example accepted format:
+/// ----------------------------------------
+/// Received: MSG 9 RSSI -94.5
+/// RSSI_PACKET: -93.5 dBm
+/// ACK sent back automatically.
+/// ----------------------------------------
 ///
-/// Returns (Option<msgnum>, Option<rssi>, Option<payload>)
+/// Returns (Option<msgnum>, Option<rssi>, Option<rssi_packet>)
 fn parse_telemetry_line(line: &str) -> (Option<u64>, Option<f64>, Option<f64>) {
     let mut msgnum = None;
     let mut rssi = None;
-    let mut payload = None;
+    let mut rssi_packet = None;
 
-    let tokens: Vec<&str> = line.split_whitespace().collect();
-    let mut i = 0;
-    while i < tokens.len() {
-        let token = tokens[i];
+    // Split the line into parts
+    let lines: Vec<&str> = line.lines().collect();
 
-        if let Some((key, val)) = token.split_once(':') {
-            match key.to_ascii_uppercase().as_str() {
-                "MSG" | "M" => msgnum = val.parse::<u64>().ok(),
-                "RSSI" | "LR" => rssi = val.parse::<f64>().ok(),
-                "VOLT" | "TEMP" | "VAL" | "VALUE" => {
-                    if payload.is_none() {
-                        payload = val.parse::<f64>().ok();
-                    }
+    // Iterate through each line
+    for l in lines {
+        let trimmed = l.trim();
+
+        // Parse "Received: MSG 9 RSSI -94.5"
+        if trimmed.starts_with("Received: MSG") {
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            if parts.len() >= 4 {
+                // Extract message number (e.g., "9")
+                if let Ok(num) = parts[2].parse::<u64>() {
+                    msgnum = Some(num);
                 }
-                _ => {}
-            }
-            i += 1;
-            continue;
-        }
-
-        if i + 1 < tokens.len() {
-            let next = tokens[i + 1];
-            match token.to_ascii_uppercase().as_str() {
-                "MSG" | "M" => msgnum = next.parse::<u64>().ok(),
-                "RSSI" | "LR" => rssi = next.parse::<f64>().ok(),
-                "VOLT" | "TEMP" | "VAL" | "VALUE" => {
-                    if payload.is_none() {
-                        payload = next.parse::<f64>().ok();
-                    }
+                // Extract RSSI (e.g., "-94.5")
+                if let Ok(val) = parts[4].parse::<f64>() {
+                    rssi = Some(val);
                 }
-                _ => {}
-            }
-            i += 2;
-            continue;
-        }
-
-        if payload.is_none() {
-            if let Ok(v) = token.parse::<f64>() {
-                payload = Some(v);
             }
         }
-
-        i += 1;
+        // Parse "RSSI_PACKET: -93.5 dBm"
+        else if trimmed.starts_with("RSSI_PACKET:") {
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            if parts.len() >= 2 {
+                // Extract RSSI_PACKET (e.g., "-93.5")
+                if let Ok(val) = parts[1].parse::<f64>() {
+                    rssi_packet = Some(val);
+                }
+            }
+        }
     }
 
-    (msgnum, rssi, payload)
+    (msgnum, rssi, rssi_packet)
 }
 
 pub fn run() -> Result<(), Box<dyn Error>> {
     // Graph configuration
     let cfg_msg = GraphConfig::new(10, 10_000, (0.0, 1000.0));
     let cfg_rssi = GraphConfig::new(10, 10_000, (-120.0, 0.0));
-    let cfg_payload = GraphConfig::new(10, 10_000, (0.0, 5.0));
+    let cfg_rssi_packet = GraphConfig::new(10, 10_000, (-120.0, 0.0));
 
     // Shared graphs
     let g_msg: SharedGraph = Arc::new(RwLock::new(GraphShared::new(
         cfg_msg,
         "Msg #",
         Color::Magenta,
-        true,
+        false,
         0.35,
     )));
     let g_rssi: SharedGraph = Arc::new(RwLock::new(GraphShared::new(
         cfg_rssi,
-        "RSSI (dBm)",
+        "RSSI ACK (dBm)",
         Color::Cyan,
         false,
         1.0,
     )));
-    let g_payload: SharedGraph = Arc::new(RwLock::new(GraphShared::new(
-        cfg_payload,
-        "Payload",
+    let g_rssi_packet: SharedGraph = Arc::new(RwLock::new(GraphShared::new(
+        cfg_rssi_packet,
+        "RSSI PACKET (dBm)",
         Color::Yellow,
-        true,
-        0.6,
+        false,
+        1.0,
     )));
 
-    let graphs: Vec<SharedGraph> = vec![g_msg.clone(), g_rssi.clone(), g_payload.clone()];
+    let graphs: Vec<SharedGraph> = vec![g_msg.clone(), g_rssi.clone(), g_rssi_packet.clone()];
 
     // Remote control thread
     {
@@ -345,7 +332,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         "/dev/ttyACM0",
         g_msg.clone(),
         g_rssi.clone(),
-        g_payload.clone(),
+        g_rssi_packet.clone(),
     );
 
     // UI setup
@@ -414,8 +401,9 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                 // Leaf are basically single panels
                 // This one set up the title
                 // And it take the place of our first vertical constraint (the 3 lines)
-                leaf(Box::new(TitlePanel::new("Live CanSat Telemetry (Serial)"))
-                    as Box<dyn crate::ui::Panel>),
+                leaf(
+                    Box::new(TitlePanel::new("Live CanSat Telemetry")) as Box<dyn crate::ui::Panel>
+                ),
                 // This one is kinda self-explanatory
                 group(
                     // Divide the second vertical constraint in a horizontal way
