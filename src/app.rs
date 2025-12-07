@@ -171,12 +171,16 @@ use crate::ui::{Node, group, leaf};
 use ratatui::style::Color;
 
 /// Spawn a thread that reads telemetry from a serial port (e.g., /dev/ttyACM0),
-/// parses each line for message number, RSSI, and RSSI_PACKET,
+/// parses each line for message
 /// and pushes them into the corresponding shared graphs.
 fn start_serial_reader(
     port_name: &str,
     g_msg: SharedGraph,
     g_rssi: SharedGraph,
+    g_temp: SharedGraph,
+    g_pres: SharedGraph,
+    g_hum: SharedGraph,
+    g_alt: SharedGraph,
     g_rssi_packet: SharedGraph,
 ) {
     let port_name = port_name.to_string();
@@ -194,7 +198,7 @@ fn start_serial_reader(
             }
         };
         let reader = BufReader::new(port);
-        println!("Serial reader started on {}", port_name);
+        // println!("Serial reader started on {}", port_name);
         for line_res in reader.lines() {
             match line_res {
                 Ok(line) => {
@@ -202,9 +206,16 @@ fn start_serial_reader(
                     if trimmed.is_empty() {
                         continue;
                     }
-                    // Parse the line for message number, RSSI, and RSSI_PACKET
-                    let (maybe_msgnum, maybe_rssi, maybe_rssi_packet) =
-                        parse_telemetry_line(trimmed);
+                    // Parse the line for all telemetry data
+                    let (
+                        maybe_msgnum,
+                        maybe_rssi,
+                        maybe_temp,
+                        maybe_pres,
+                        maybe_hum,
+                        maybe_alt,
+                        maybe_rssi_packet,
+                    ) = parse_telemetry_line(trimmed);
 
                     // Update message graph
                     if let Some(msgnum) = maybe_msgnum {
@@ -218,6 +229,34 @@ fn start_serial_reader(
                         if let Ok(mut gr) = g_rssi.write() {
                             let x = gr.data.history.back().map(|(x, _)| x + 1.0).unwrap_or(0.0);
                             gr.data.push_point(x, rssi);
+                        }
+                    }
+                    // Update temperature graph
+                    if let Some(temp) = maybe_temp {
+                        if let Ok(mut gt) = g_temp.write() {
+                            let x = gt.data.history.back().map(|(x, _)| x + 1.0).unwrap_or(0.0);
+                            gt.data.push_point(x, temp);
+                        }
+                    }
+                    // Update pressure graph
+                    if let Some(pres) = maybe_pres {
+                        if let Ok(mut gp) = g_pres.write() {
+                            let x = gp.data.history.back().map(|(x, _)| x + 1.0).unwrap_or(0.0);
+                            gp.data.push_point(x, pres);
+                        }
+                    }
+                    // Update humidity graph
+                    if let Some(hum) = maybe_hum {
+                        if let Ok(mut gh) = g_hum.write() {
+                            let x = gh.data.history.back().map(|(x, _)| x + 1.0).unwrap_or(0.0);
+                            gh.data.push_point(x, hum);
+                        }
+                    }
+                    // Update altitude graph
+                    if let Some(alt) = maybe_alt {
+                        if let Ok(mut ga) = g_alt.write() {
+                            let x = ga.data.history.back().map(|(x, _)| x + 1.0).unwrap_or(0.0);
+                            ga.data.push_point(x, alt);
                         }
                     }
                     // Update RSSI_PACKET graph
@@ -239,19 +278,33 @@ fn start_serial_reader(
     });
 }
 
-/// Parse a telemetry line and extract message number, RSSI, and RSSI_PACKET.
+/// Parse a telemetry line and extract all telemetry data.
 ///
 /// Example accepted format:
 /// ----------------------------------------
-/// Received: MSG 9 RSSI -94.5
-/// RSSI_PACKET: -93.5 dBm
+/// M 136 R -91.0 T 18.45 P 995.85 H 58.93 A 300.045200
+/// RSSI_PACKET: -89.5 dBm
 /// ACK sent back automatically.
 /// ----------------------------------------
 ///
-/// Returns (Option<msgnum>, Option<rssi>, Option<rssi_packet>)
-fn parse_telemetry_line(line: &str) -> (Option<u64>, Option<f64>, Option<f64>) {
+/// Returns (Option<msgnum>, Option<rssi>, Option<temp>, Option<pres>, Option<hum>, Option<alt>, Option<rssi_packet>)
+fn parse_telemetry_line(
+    line: &str,
+) -> (
+    Option<u64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+) {
     let mut msgnum = None;
     let mut rssi = None;
+    let mut temp = None;
+    let mut pres = None;
+    let mut hum = None;
+    let mut alt = None;
     let mut rssi_packet = None;
 
     // Split the line into parts
@@ -261,39 +314,59 @@ fn parse_telemetry_line(line: &str) -> (Option<u64>, Option<f64>, Option<f64>) {
     for l in lines {
         let trimmed = l.trim();
 
-        // Parse "Received: MSG 9 RSSI -94.5"
-        if trimmed.starts_with("Received: MSG") {
+        // Parse "Received: M 136 R -91.0 T 18.45 P 995.85 H 58.93 A 300.045200"
+        //         0        1  2  3  4    5   6   7  8     9   10  11   12
+        if trimmed.starts_with("Received: M ") {
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
-            if parts.len() >= 4 {
-                // Extract message number (e.g., "9")
+            if parts.len() >= 12 {
+                // Extract message number (e.g., "136")
                 if let Ok(num) = parts[2].parse::<u64>() {
                     msgnum = Some(num);
                 }
-                // Extract RSSI (e.g., "-94.5")
+                // Extract RSSI (e.g., "-91.0")
                 if let Ok(val) = parts[4].parse::<f64>() {
                     rssi = Some(val);
                 }
+                // Extract temperature (e.g., "18.45")
+                if let Ok(val) = parts[6].parse::<f64>() {
+                    temp = Some(val);
+                }
+                // Extract pressure (e.g., "995.85")
+                if let Ok(val) = parts[8].parse::<f64>() {
+                    pres = Some(val);
+                }
+                // Extract humidity (e.g., "58.93")
+                if let Ok(val) = parts[10].parse::<f64>() {
+                    hum = Some(val);
+                }
+                // Extract altitude (e.g., "300.045200")
+                if let Ok(val) = parts[12].parse::<f64>() {
+                    alt = Some(val);
+                }
             }
         }
-        // Parse "RSSI_PACKET: -93.5 dBm"
+        // Parse "RSSI_PACKET: -89.5 dBm"
         else if trimmed.starts_with("RSSI_PACKET:") {
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
             if parts.len() >= 2 {
-                // Extract RSSI_PACKET (e.g., "-93.5")
+                // Extract RSSI_PACKET (e.g., "-89.5")
                 if let Ok(val) = parts[1].parse::<f64>() {
                     rssi_packet = Some(val);
                 }
             }
         }
     }
-
-    (msgnum, rssi, rssi_packet)
+    (msgnum, rssi, temp, pres, hum, alt, rssi_packet)
 }
 
 pub fn run() -> Result<(), Box<dyn Error>> {
     // Graph configuration
     let cfg_msg = GraphConfig::new(50, 1_000, (0.0, 1000.0));
     let cfg_rssi = GraphConfig::new(50, 1_000, (-120.0, 0.0));
+    let cfg_temp = GraphConfig::new(50, 1_000, (-10.0, 25.0));
+    let cfg_pres = GraphConfig::new(50, 1_000, (800.0, 1500.0));
+    let cfg_hum = GraphConfig::new(50, 1_000, (0.0, 100.0));
+    let cfg_alt = GraphConfig::new(50, 1_000, (0.0, 5000.0));
     let cfg_rssi_packet = GraphConfig::new(50, 1_000, (-120.0, 0.0));
 
     // Shared graphs
@@ -301,7 +374,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         cfg_msg,
         "Msg #",
         Color::Magenta,
-        false,
+        true,
         0.35,
     )));
     let g_rssi: SharedGraph = Arc::new(RwLock::new(GraphShared::new(
@@ -309,6 +382,34 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         "RSSI ACK (dBm)",
         Color::Cyan,
         true,
+        0.5,
+    )));
+    let g_temp: SharedGraph = Arc::new(RwLock::new(GraphShared::new(
+        cfg_temp,
+        "TEMP (°C)",
+        Color::Red,
+        false,
+        0.5,
+    )));
+    let g_pres: SharedGraph = Arc::new(RwLock::new(GraphShared::new(
+        cfg_pres,
+        "PRESSURE (hPa)",
+        Color::Green,
+        true,
+        1.0,
+    )));
+    let g_hum: SharedGraph = Arc::new(RwLock::new(GraphShared::new(
+        cfg_hum,
+        "HUMIDITY (%)",
+        Color::Blue,
+        false,
+        0.5,
+    )));
+    let g_alt: SharedGraph = Arc::new(RwLock::new(GraphShared::new(
+        cfg_alt,
+        "ALTITUDE (m)",
+        Color::LightMagenta,
+        false,
         0.5,
     )));
     let g_rssi_packet: SharedGraph = Arc::new(RwLock::new(GraphShared::new(
@@ -319,7 +420,15 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         0.5,
     )));
 
-    let graphs: Vec<SharedGraph> = vec![g_msg.clone(), g_rssi.clone(), g_rssi_packet.clone()];
+    let graphs: Vec<SharedGraph> = vec![
+        g_msg.clone(),
+        g_rssi.clone(),
+        g_temp.clone(),
+        g_pres.clone(),
+        g_hum.clone(),
+        g_alt.clone(),
+        g_rssi_packet.clone(),
+    ];
 
     // Remote control thread
     {
@@ -332,8 +441,21 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         "/dev/ttyACM0",
         g_msg.clone(),
         g_rssi.clone(),
+        g_temp.clone(),
+        g_pres.clone(),
+        g_hum.clone(),
+        g_alt.clone(),
         g_rssi_packet.clone(),
     );
+
+    // Split graphs into left and right groups
+    let left_graphs = vec![
+        g_msg.clone(),
+        g_rssi.clone(),
+        g_temp.clone(),
+        g_pres.clone(),
+    ];
+    let right_graphs = vec![g_hum.clone(), g_alt.clone(), g_rssi_packet.clone()];
 
     // UI setup
     let mut terminal = ratatui::init();
@@ -345,16 +467,16 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     while running {
         let frame_start = std::time::Instant::now();
 
-        // This basically set how the graphs should be `packaged` bc it mainly put other panels next to
-        // the graphs
-        // Don't bother with this. It's details.
+        // Left children (4 graphs)
         let mut left_children: Vec<Node> = Vec::new();
-        for i in 0..graphs.len() {
-            let gp =
-                leaf(Box::new(GraphPanel::new(graphs[i].clone())) as Box<dyn crate::ui::Panel>);
+        for i in 0..left_graphs.len() {
+            let gp = leaf(
+                Box::new(GraphPanel::new(left_graphs[i].clone())) as Box<dyn crate::ui::Panel>
+            );
             let hist =
-                leaf(Box::new(HistoryPanel::new(graphs[i].clone())) as Box<dyn crate::ui::Panel>);
-            let mut info_panel = InfoPanel::new(graphs[i].clone());
+                leaf(Box::new(HistoryPanel::new(left_graphs[i].clone()))
+                    as Box<dyn crate::ui::Panel>);
+            let mut info_panel = InfoPanel::new(left_graphs[i].clone());
             info_panel.highlighted = i == focused;
             let info = leaf(Box::new(info_panel) as Box<dyn crate::ui::Panel>);
 
@@ -379,11 +501,45 @@ pub fn run() -> Result<(), Box<dyn Error>> {
             left_children.push(region);
         }
 
+        // Right children (3 graphs)
+        let mut right_children: Vec<Node> = Vec::new();
+        for i in 0..right_graphs.len() {
+            let gp = leaf(
+                Box::new(GraphPanel::new(right_graphs[i].clone())) as Box<dyn crate::ui::Panel>
+            );
+            let hist =
+                leaf(Box::new(HistoryPanel::new(right_graphs[i].clone()))
+                    as Box<dyn crate::ui::Panel>);
+            let mut info_panel = InfoPanel::new(right_graphs[i].clone());
+            info_panel.highlighted = (i + left_graphs.len()) == focused;
+            let info = leaf(Box::new(info_panel) as Box<dyn crate::ui::Panel>);
+
+            let region = group(
+                ratatui::layout::Direction::Vertical,
+                vec![
+                    ratatui::layout::Constraint::Percentage(70),
+                    ratatui::layout::Constraint::Percentage(30),
+                ],
+                vec![
+                    gp,
+                    group(
+                        ratatui::layout::Direction::Horizontal,
+                        vec![
+                            ratatui::layout::Constraint::Percentage(60),
+                            ratatui::layout::Constraint::Percentage(40),
+                        ],
+                        vec![hist, info],
+                    ),
+                ],
+            );
+            right_children.push(region);
+        }
+
         // That's the part of code that set up the `Controls` panel
-        let extra = leaf(Box::new(ParagraphPanel::new(
-            "TAB=Focus  A=Autoscale  S=Smoothing  L=Lock bounds  Q=Quit",
-            "Controls",
-        )) as Box<dyn crate::ui::Panel>);
+        // let extra = leaf(Box::new(ParagraphPanel::new(
+        //     "TAB=Focus  A=Autoscale  S=Smoothing  L=Lock bounds  Q=Quit",
+        //     "Controls",
+        // )) as Box<dyn crate::ui::Panel>);
 
         // This set up the main interface layout
         let root = group(
@@ -392,10 +548,8 @@ pub fn run() -> Result<(), Box<dyn Error>> {
             vec![
                 // 3 lines
                 ratatui::layout::Constraint::Length(3),
-                // 80% of the screen
-                ratatui::layout::Constraint::Percentage(80),
-                // minimum 3 lines but could be more
-                ratatui::layout::Constraint::Min(3),
+                // min to adapt to the sceen
+                ratatui::layout::Constraint::Min(20),
             ],
             vec![
                 // Leaf are basically single panels
@@ -408,10 +562,10 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                 group(
                     // Divide the second vertical constraint in a horizontal way
                     ratatui::layout::Direction::Horizontal,
-                    // The right part take 60% and the left 40%
+                    // The right part take 50% and the left 50%
                     vec![
-                        ratatui::layout::Constraint::Percentage(60),
-                        ratatui::layout::Constraint::Percentage(40),
+                        ratatui::layout::Constraint::Percentage(50),
+                        ratatui::layout::Constraint::Percentage(50),
                     ],
                     // Now what to put into these panels ?
                     // Here where puting the actual panels where we layed out everything
@@ -421,20 +575,24 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                         group(
                             ratatui::layout::Direction::Vertical,
                             vec![
-                                ratatui::layout::Constraint::Percentage(33),
-                                ratatui::layout::Constraint::Percentage(33),
-                                ratatui::layout::Constraint::Percentage(34),
+                                ratatui::layout::Constraint::Percentage(25),
+                                ratatui::layout::Constraint::Percentage(25),
+                                ratatui::layout::Constraint::Percentage(25),
+                                ratatui::layout::Constraint::Percentage(25),
                             ],
-                            // Here we call the thing that contain the grpahs
                             left_children,
                         ),
-                        // Here we call the extra, which is the `Control` panel that we set up earlier
-                        extra,
+                        group(
+                            ratatui::layout::Direction::Vertical,
+                            vec![
+                                ratatui::layout::Constraint::Percentage(34),
+                                ratatui::layout::Constraint::Percentage(33),
+                                ratatui::layout::Constraint::Percentage(33),
+                            ],
+                            right_children,
+                        ),
                     ],
                 ),
-                // You should have understood how to set up everything by now
-                leaf(Box::new(ParagraphPanel::new("Press Q to quit.", "Footer"))
-                    as Box<dyn crate::ui::Panel>),
             ],
         );
 
