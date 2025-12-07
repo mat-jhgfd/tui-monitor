@@ -4,6 +4,7 @@
 from machine import SPI, Pin
 from rfm69 import RFM69
 import time
+from test_tobias import Logger
 
 led = Pin(25, Pin.OUT)
 
@@ -46,6 +47,7 @@ i2c = I2C(0, sda=Pin(8), scl=Pin(9) )
 
 baseline = 1004.0 # day's pressure at sea level
 bmp = BME280( i2c=i2c, address=BMP280_I2CADDR )
+logger = Logger()
 
 while True:
     led.toggle()
@@ -55,6 +57,9 @@ while True:
     sensor_humidity = bmp.raw_values[2]
     altitude = (baseline - sensor_pressure)*8.3
     msg = " %d  %3.1f  %2.2f  %4.2f  %2.2f  %3.3f" % (counter, 0 if last_rssi is None else last_rssi, sensor_temperature, sensor_pressure, sensor_humidity, altitude)
+    logger.add_info_line(msg)
+    for i in range(1):
+        logger.force_saving()
     print("Send:", msg)
     ack = rfm.send_with_ack(bytes(msg, "utf-8"))
     if ack:
