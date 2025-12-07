@@ -314,33 +314,33 @@ fn parse_telemetry_line(
     for l in lines {
         let trimmed = l.trim();
 
-        // Parse "Received: M 136 R -91.0 T 18.45 P 995.85 H 58.93 A 300.045200"
-        //         0        1  2  3  4    5   6   7  8     9   10  11   12
-        if trimmed.starts_with("Received: M ") {
+        // Parse "Received:  136  -91.0  18.45  995.85  58.93  300.045200"
+        //         0          1    2     3      4       5       6
+        if trimmed.starts_with("Received: ") {
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
-            if parts.len() >= 12 {
+            if parts.len() >= 7 {
                 // Extract message number (e.g., "136")
-                if let Ok(num) = parts[2].parse::<u64>() {
+                if let Ok(num) = parts[1].parse::<u64>() {
                     msgnum = Some(num);
                 }
                 // Extract RSSI (e.g., "-91.0")
-                if let Ok(val) = parts[4].parse::<f64>() {
+                if let Ok(val) = parts[2].parse::<f64>() {
                     rssi = Some(val);
                 }
                 // Extract temperature (e.g., "18.45")
-                if let Ok(val) = parts[6].parse::<f64>() {
+                if let Ok(val) = parts[3].parse::<f64>() {
                     temp = Some(val);
                 }
                 // Extract pressure (e.g., "995.85")
-                if let Ok(val) = parts[8].parse::<f64>() {
+                if let Ok(val) = parts[4].parse::<f64>() {
                     pres = Some(val);
                 }
                 // Extract humidity (e.g., "58.93")
-                if let Ok(val) = parts[10].parse::<f64>() {
+                if let Ok(val) = parts[5].parse::<f64>() {
                     hum = Some(val);
                 }
                 // Extract altitude (e.g., "300.045200")
-                if let Ok(val) = parts[12].parse::<f64>() {
+                if let Ok(val) = parts[6].parse::<f64>() {
                     alt = Some(val);
                 }
             }

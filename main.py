@@ -33,7 +33,7 @@ counter = 1
 last_rssi = None
 
 rfm.ack_retries = 2   # Try up to x times for ACK
-rfm.ack_wait = 1.0    # Wait 500ms for ACK
+rfm.ack_wait = 1.0    # Wait x ms for ACK
 
 # Read Local pressure then
 # Calculate corresponding Altitude
@@ -54,7 +54,7 @@ while True:
     sensor_pressure = bmp.raw_values[1]
     sensor_humidity = bmp.raw_values[2]
     altitude = (baseline - sensor_pressure)*8.3
-    msg = "M %d R %3.1f T %2.2f P %4.2f H %2.2f A %3.6f" % (counter, 0 if last_rssi is None else last_rssi, sensor_temperature, sensor_pressure, sensor_humidity, altitude)
+    msg = " %d  %3.1f  %2.2f  %4.2f  %2.2f  %3.6f" % (counter, 0 if last_rssi is None else last_rssi, sensor_temperature, sensor_pressure, sensor_humidity, altitude)
     print("Send:", msg)
     ack = rfm.send_with_ack(bytes(msg, "utf-8"))
     if ack:
