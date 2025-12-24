@@ -188,7 +188,7 @@ fn start_serial_reader(
         let baud_rate = 115_200;
         println!("Opening serial port {} @ {} baud", port_name, baud_rate);
         let port = match serialport::new(&port_name, baud_rate)
-            .timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(100000))
             .open()
         {
             Ok(p) => p,
