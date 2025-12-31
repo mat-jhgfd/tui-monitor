@@ -1,10 +1,11 @@
 
 """ CANSAT PICO Emitter node (With ACK + Encryption) """
 
-from machine import SPI, Pin
+from machine import SPI, Pin, UART
 from rfm69 import RFM69
 import time
 from test_tobias import Logger
+from micropyGPS import MicropyGPS
 
 led = Pin(25, Pin.OUT)
 
@@ -48,6 +49,8 @@ i2c = I2C(0, sda=Pin(8), scl=Pin(9) )
 baseline = 1014.0 # day's pressure at sea level
 bmp = BME280( i2c=i2c, address=BMP280_I2CADDR )
 logger = Logger()
+my_gps = MicropyGPS()
+gps_serial = UART(0, baudrate=9600, tx=Pin(12), rx=Pin(13))
 
 while True:
     led.toggle()
@@ -58,6 +61,24 @@ while True:
     altitude = (baseline - sensor_pressure)*8.3
     msg = " %d  %3.1f  %2.2f  %4.2f  %2.2f  %3.2f" % (counter, 0 if last_rssi is None else last_rssi, sensor_temperature, sensor_pressure, sensor_humidity, altitude)
     print("Send:", msg)
+    try:
+        while gps_serial.any():
+            data = gps_serial.read()
+            for byte in data:
+                stat = my_gps.update(chr(byte))
+                if stat is not None:
+                    # Print parsed GPS data
+                    print('UTC Timestamp:', my_gps.timestamp)
+                    print('Date:', my_gps.date_string('long'))
+                    print('Latitude:', my_gps.latitude_string())
+                    print('Longitude:', my_gps.longitude_string())
+                    print('Altitude:', my_gps.altitude)
+                    print('Satellites in use:', my_gps.satellites_in_use)
+                    print('Horizontal Dilution of Precision:', my_gps.hdop)
+                    print()
+            
+    except Exception as e:
+        print(f"An error occurred: {e}")
     ack = rfm.send_with_ack(bytes(msg, "utf-8"))
     if ack:
         last_rssi = rfm.rssi
